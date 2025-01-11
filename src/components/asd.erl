@@ -1,5 +1,5 @@
 -module(server).
--export([init/0, start/0, stop/0, put/2, del/1]).
+-export([init/0, start/0, stop/0, put/2]).
 
 %% Inicialización del manejador
 init() ->
@@ -32,9 +32,6 @@ msgHandler() ->
             msgHandler();
         {put, Src, Key, Value, Timestamp} ->
             dictionaryServer ! {put, Src, Key, Value, Timestamp},
-            msgHandler();
-        {remove, Src, Key, Timestamp} ->
-            dictionaryServer ! {remove, Src, Key, Timestamp},
             msgHandler();
         _ ->
             io:format("Protocol error.~n"),
@@ -73,56 +70,41 @@ put(Key, Value, Timestamp) ->
             io:format("[put/3] error, Key-Value already exists or timestamp stored is greater.~n~p", [Reply])
     end.
 
-del(Key) ->
-    del(Key, calendar:local_time()).
-
-del(Key, Timestamp) ->
-    msgHandler ! {remove, self(), Key, Timestamp},
-    receive
-        {ok, Reply} ->
-            io:format("[rem/3] Key ~p removed.~n~p", [Key, Reply]);
-        {error, Reply} ->
-            io:format("[rem/3] Error removing key: ~p.~n~p", [Key, Reply])
-    end.
-
 dictionaryStart() ->
     io:format("Starting dictionary server. ~n"),
     listen(maps:new()). %% Inicia el diccionario vacio
 
-listen(Map) ->
+listen(Map) -> 
     receive
-        {put, Src, Key, Value, Timestamp} -> 
+        {put, Src, Key, Value, Timestamp} ->
             case maps:find(Key, Map) of
-                error -> 
+                error ->
                     NewMap = maps:put(Key, {Value, Timestamp, false}, Map),
                     Src ! {ok, NewMap},
                     listen(NewMap);
-                {ok, {_, TimestampStored, Deleted}} -> 
-                    case (calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp) orelse Deleted) of
-                        true -> 
-                            NewMap = maps:update(Key, {Value, Timestamp, false}, Map),
-                            Src ! {ok, NewMap},
-                            listen(NewMap);
-                        false -> 
+                {ok, {_, TimestampStored, Deleted}} ->
+                    case calendar:datetime_to_gregorian_seconds(TimestampStored) > calendar:datetime_to_gregorian_seconds(Timestamp) of
+                        true ->
                             Src ! {error, Map},
-                            listen(Map)
+                            listen(Map);
+                        false ->
+                            NewMap = maps:update(Key, {Value, Timestamp}, Map),
+                            Src ! {ok, NewMap},
+                            listen(NewMap)
                     end
             end;
-
-        {remove, Src, Key, Timestamp} -> 
+        {rem, Src, Key, Timestamp} ->
             case maps:find(Key, Map) of
-                error -> 
+                error ->
                     Src ! {error, "No key found."};
-                {ok, {Value, TimestampStored, Deleted}} -> 
-                    case {calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp), Deleted} of
-                        {true, false} -> 
-                            NewMap = maps:update(Key, {Value, Timestamp, true}, Map),
-                            Src ! {ok, NewMap},
-                            listen(NewMap);
-                        _ -> 
+                {ok, {_, TimestampStored}} ->
+                    case calendar:datetime_to_gregorian_seconds(TimestampStored) > calendar:datetime_to_gregorian_seconds(Timestamp) of
+                        true ->
                             Src ! {error, Map},
-                            listen(Map)
+                            listen(Map);
+                        false ->
+                            NewMap = maps:update(Key, {Value, Timestamp}, Map),
+                            Src ! {ok, NewMap},
+                            listen(NewMap)
                     end
-            end
     end.
-    
