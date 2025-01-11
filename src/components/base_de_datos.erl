@@ -1,6 +1,6 @@
 -module(base_de_datos).
 
--export([init/0, start/2, say/1, stop/1]).
+-export([init/0, start/2, say/1, stop/0, stop/1]).
 
 init() ->
     Pid_msgHandler = spawn(fun() -> msgHandler(maps:new()) end),
@@ -16,9 +16,9 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                 false ->
                     case N of
                         N when N > 0 ->
-                            create(Name, N),
+                            NamesList = create(Name, N, []),
                             Src ! {ok, "Databases created."},
-                            NewNames = maps:put(Name, N, Names),
+                            NewNames = maps:put(Name, NamesList, Names),
                             msgHandler(NewNames);
                         _ ->
                             Src ! {error, "N must be greater than 0."}
@@ -30,20 +30,27 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                 error ->
                     Src ! {error, "Replic name not found"};
                 {ok, Value} ->
-                    stopRep(Name, Value),
+                    stopRep(Value),
                     Src ! {ok, ""},
                     NewNames = maps:remove(Name, Names),
                     msgHandler(NewNames)
-            end
+            end;
+        {stop, Src} ->
+            AllReplicas = lists:flatten(maps:values(Names)),
+            stopRep(AllReplicas),
+            Src ! {ok, "All replicas stopped."},
+            msgHandler(maps:new())
     end.
 
-create(_, 0) ->
-    io:format("[create/2] Databases created and registered.~n");
-create(Name, N) when N > 0 ->
+create(_, 0, List) ->
+    io:format("[create/2] Databases created and registered.~n"),
+    List;
+create(Name, N, List) when N > 0 ->
+    ReplicName = list_to_atom(atom_to_list(Name) ++ "-" ++ integer_to_list(N)),
     Pid_newDb = spawn(fun() -> dbInit() end),
-    register(list_to_atom(atom_to_list(Name) ++ "-" ++ integer_to_list(N)), Pid_newDb),
-    io:format("[create/2] Database [~p-~p] created with PID: ~p.~n", [Name, N, Pid_newDb]),
-    create(Name, N-1).
+    register(ReplicName, Pid_newDb),
+    io:format("[create/2] Database [~p] created with PID: ~p.~n", [ReplicName, Pid_newDb]),
+    create(Name, N-1, [ReplicName | List]).
 
 dbInit() ->
     receive
@@ -69,20 +76,27 @@ stop(Name) ->
         {error, Reason} ->
             io:format("[stop/1] Error al detener las replicas.~n~pReason: ", [Reason])
     end.
+stop() ->
+    msgHandler ! {stop, self()},
+    receive
+        {ok, _} ->
+            io:format("[stop/0] Se detuvieron todas las réplicas.~n");
+        {error, Reason} ->
+            io:format("[stop/0] Error al detener todas las réplicas.~nReason: ~p", [Reason])
+    end.
 
 say(Replica) -> % Es para probar que las replicas se encuentren activas, say(replica, mensaje) donde replica es un LIST! importante!
     list_to_atom(Replica) ! {""}.
 
-stopRep(Name, 0) ->
-    io:format("Se detuvieron todas las replicas con el nombre [~p]", [Name]);
-stopRep(Name, N) when N > 0 ->
-    ReplicaName = list_to_atom(atom_to_list(Name) ++ "-" ++ integer_to_list(N)),
-    case whereis(ReplicaName) of
+stopRep([]) ->
+    io:format("Se detuvieron todas las replicas.~n");
+stopRep([Head | Tail]) ->
+    case whereis(Head) of
         undefined ->
-            io:format("Replica [~p] not found.~n", [ReplicaName]);
+            io:format("Replica [~p] not found.~n", [Head]);
         Pid ->
             exit(Pid, normal),
-            unregister(ReplicaName),
-            io:format("Replica [~p] stopped.~n", [ReplicaName])
+            unregister(Head),
+            io:format("Replica [~p] stopped.~n", [Head])
     end,
-    stopRep(Name, N - 1).
+    stopRep(Tail).
