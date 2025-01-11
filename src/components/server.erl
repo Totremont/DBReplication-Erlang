@@ -1,5 +1,5 @@
--module(eventServer).
--export([init/0, start/0, stop/0]).
+-module(server).
+-export([init/0, start/0, stop/0, put/2]).
 
 %% Inicialización del manejador
 init() ->
@@ -30,6 +30,9 @@ msgHandler() ->
                     Src ! {ok, "Dictionary Server stopped."}
             end,
             msgHandler();
+        {put, Src, Key, Value, Timestamp} ->
+            dictionaryServer ! {put, Src, Key, Value, Timestamp},
+            msgHandler();
         _ ->
             io:format("Protocol error.~n"),
             msgHandler()
@@ -55,8 +58,39 @@ stop() ->
             io:format("[stop/0] Error, dictionary server not found.~n")
     end.
 
+put(Key, Value) ->
+    put(Key, Value, calendar:local_time()).
+
+put(Key, Value, Timestamp) ->
+    msgHandler ! {put, self(), Key, Value, Timestamp},
+    receive
+        {ok, Reply} ->
+            io:format("[put/3] Key-Value stored! ~n~p", [Reply]);
+        {error, Reply} ->
+            io:format("[put/3] error, Key-Value already exists or timestamp stored is greater.~n~p", [Reply])
+    end.
+
 dictionaryStart() ->
     io:format("Starting dictionary server. ~n"),
-    loop(). %% Para que no se muera el thread
+    listen(maps:new()). %% Inicia el diccionario vacio
 
-loop() -> loop().
+listen(Map) -> 
+    receive
+        {put, Src, Key, Value, Timestamp} ->
+            case maps:find(Key, Map) of
+                error ->
+                    NewMap = maps:put(Key, {Value, Timestamp}, Map),
+                    Src ! {ok, NewMap},
+                    listen(NewMap);
+                {ok, {_, TimestampStored}} ->
+                    case calendar:datetime_to_gregorian_seconds(TimestampStored) > calendar:datetime_to_gregorian_seconds(Timestamp) of
+                        true ->
+                            Src ! {error, Map},
+                            listen(Map);
+                        false ->
+                            NewMap = maps:update(Key, {Value, Timestamp}, Map),
+                            Src ! {ok, NewMap},
+                            listen(NewMap)
+                    end
+            end
+    end.
