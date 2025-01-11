@@ -1,5 +1,5 @@
 -module(server).
--export([init/0, start/0, stop/0, put/2, del/1, get/1]).
+-export([init/0, start/0, stop/0, put/2, del/1, get/1, size/0]).
 
 %% Inicialización del manejador
 init() ->
@@ -38,6 +38,9 @@ msgHandler() ->
             msgHandler();
         {get, Src, Key} ->
             dictionaryServer ! {get, Src, Key},
+            msgHandler();
+        {size, Src} ->
+            dictionaryServer ! {size, Src},
             msgHandler();
         _ ->
             io:format("Protocol error.~n"),
@@ -92,11 +95,18 @@ get(Key) ->
     msgHandler ! {get, self(), Key},
     receive
         {ok, Value, Timestamp} ->
-            io:format("Key found, value: ~p, timestamp: ~p.~n", [Value, Timestamp]);
+            io:format("[get/1] Key found, value: ~p, timestamp: ~p.~n", [Value, Timestamp]);
         {ko, Timestamp} ->
-            io:format("Key was deleted on ~p.~n", [Timestamp]);
+            io:format("[get/1] Key was deleted on ~p.~n", [Timestamp]);
         {notfound} ->
-            io:format("Key doesn't exists.~n")
+            io:format("[get/1] Key doesn't exists.~n")
+    end.
+
+size() ->
+    msgHandler ! {size, self()},
+    receive
+        {ok, Size} ->
+            io:format("[size/0] Size: ~p.~n", [Size])
     end.
 
 dictionaryStart() ->
@@ -151,6 +161,10 @@ listen(Map) ->
                             Src ! {ok, Value, Timestamp}
                     end
             end,
+            listen(Map);
+
+        {size, Src} ->
+            Src ! {ok, maps:size(Map)},
             listen(Map)
     end.
     
