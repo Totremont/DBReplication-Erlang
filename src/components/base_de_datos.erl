@@ -1,6 +1,6 @@
 -module(base_de_datos).
 
--export([init/0, start/2, say/1, stop/0, stop/1]).
+-export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5]).
 
 init() ->
     Pid_msgHandler = spawn(fun() -> msgHandler(maps:new()) end),
@@ -39,7 +39,16 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
             AllReplicas = lists:flatten(maps:values(Names)),
             stopRep(AllReplicas),
             Src ! {ok, "All replicas stopped."},
-            msgHandler(maps:new())
+            msgHandler(maps:new());
+        {put, Src, Key, Value, Timestamp, Consistency, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."};
+                _ ->
+                    Family = getFamily(Coord),
+                    Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+            end,
+            msgHandler(Names)
     end.
 
 create(_, 0, List) ->
@@ -47,17 +56,11 @@ create(_, 0, List) ->
     List;
 create(Name, N, List) when N > 0 ->
     ReplicName = list_to_atom(atom_to_list(Name) ++ "-" ++ integer_to_list(N)),
-    Pid_newDb = spawn(fun() -> dbInit() end),
-    register(ReplicName, Pid_newDb),
-    io:format("[create/2] Database [~p] created with PID: ~p.~n", [ReplicName, Pid_newDb]),
+    %Pid_newDb = spawn(fun() -> replica:start(self(), ReplicName) end),
+    spawn(fun() -> replica:start(self(), ReplicName) end),
+    %register(ReplicName, Pid_newDb),
+    %io:format("[create/2] Database [~p] created with PID: ~p.~n", [ReplicName, Pid_newDb]),
     create(Name, N-1, [ReplicName | List]).
-
-dbInit() ->
-    receive
-        {_} ->
-            io:format("Hola mundo! Soy el PID [~p] y me llegó un mensaje", [self()]),
-            dbInit()
-    end.
 
 start(Name, N) ->
     msgHandler ! {start, self(), Name, N},
@@ -85,6 +88,17 @@ stop() ->
             io:format("[stop/0] Error al detener todas las réplicas.~nReason: ~p", [Reason])
     end.
 
+put(Key, Value, Consistency, Coord)->
+    put(Key, Value, calendar:local_time(), Consistency, Coord).    
+put(Key, Value, Timestamp, Consistency, Coord) ->
+    msgHandler ! {put, self(), Key, Value, Timestamp, Consistency, Coord},
+    receive
+        {ok, _} ->
+            io:format("[put/5] Se insertó el par Clave-Valor.~n");
+        {error, _} ->
+            io:format("[put/5] Error al insertar el par Clave-Valor.~n")
+    end.
+
 say(Replica) -> % Es para probar que las replicas se encuentren activas, say(replica, mensaje) donde replica es un LIST! importante!
     list_to_atom(Replica) ! {""}.
 
@@ -100,3 +114,7 @@ stopRep([Head | Tail]) ->
             io:format("Replica [~p] stopped.~n", [Head])
     end,
     stopRep(Tail).
+
+getFamily(Atom) ->
+    String = atom_to_list(Atom),
+    list_to_atom(hd(string:tokens(String, "-"))).
