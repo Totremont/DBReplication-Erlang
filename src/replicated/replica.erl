@@ -1,5 +1,6 @@
 -module(replica).
 -export([start/3]).
+-record(data,{status = present, value, timestamp}).  %% Status = present | removed
 
 start(Pid,Name,Others) -> 
     try register(Name,self()) of
