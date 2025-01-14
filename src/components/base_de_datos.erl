@@ -57,6 +57,42 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                             Src ! {error, "Family not found"},
                             msgHandler(Names)
                     end
+            end;
+        {put, Src, Key, Value, Timestamp, quorum, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit(List, [], Src, quorum) end),
+                            sendPutTo(List, CoordPid, Key, Value, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
+            end;
+        {put, Src, Key, Value, Timestamp, all, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit(List, [], Src, all) end),
+                            sendPutTo(List, CoordPid, Key, Value, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
             end
     end.
 
@@ -140,7 +176,7 @@ sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
     Head ! {put, Src, Key, Value, Timestamp},
     sendPutTo(Tail, Src, Key, Value, Timestamp).
 
-coordInit([], Accepted, Src, _) ->
+coordInit([], Accepted, Src, one) ->
     Src ! {ok, Accepted};
 coordInit(Pending, Accepted, Src, one) ->
     receive
@@ -162,5 +198,59 @@ coordInit(Pending, Accepted, Src, one) ->
                     coordInit(NewList, NewAcc, Src, one);
                 false ->
                     coordInit(Pending, Accepted, Src, one)
+            end
+    end;
+coordInit(Pending, Accepted, Src, quorum) ->
+    case length(Accepted) >= length(Pending) of
+        true ->
+            Src ! {ok, Accepted};
+        false ->
+            receive
+                {ok, ReplicName} ->
+                    case lists:member(ReplicName, Pending) of
+                        true ->
+                            NewList = lists:delete(ReplicName, Pending),
+                            NewAcc = [ReplicName | Accepted],
+                            coordInit(NewList, NewAcc, Src, quorum);
+                        false ->
+                            coordInit(Pending, Accepted, Src, quorum)
+                    end;
+                {error, ReplicName} ->
+                    case lists:member(ReplicName, Pending) of
+                        true ->
+                            io:format("Error by ~p~n", [ReplicName]),
+                            NewList = lists:delete(ReplicName, Pending),
+                            NewAcc = [ReplicName | Accepted],
+                            coordInit(NewList, NewAcc, Src, quorum);
+                        false ->
+                            coordInit(Pending, Accepted, Src, quorum)
+                    end
+            end
+    end;
+coordInit(Pending, Accepted, Src, all) ->
+    case length(Pending) == 0 of
+        true ->
+            Src ! {ok, Accepted};
+        false ->
+            receive
+                {ok, ReplicName} ->
+                    case lists:member(ReplicName, Pending) of
+                        true ->
+                            NewList = lists:delete(ReplicName, Pending),
+                            NewAcc = [ReplicName | Accepted],
+                            coordInit(NewList, NewAcc, Src, all);
+                        false ->
+                            coordInit(Pending, Accepted, Src, all)
+                    end;
+                {error, ReplicName} ->
+                    case lists:member(ReplicName, Pending) of
+                        true ->
+                            io:format("Error by ~p~n", [ReplicName]),
+                            NewList = lists:delete(ReplicName, Pending),
+                            NewAcc = [ReplicName | Accepted],
+                            coordInit(NewList, NewAcc, Src, all);
+                        false ->
+                            coordInit(Pending, Accepted, Src, all)
+                    end
             end
     end.
