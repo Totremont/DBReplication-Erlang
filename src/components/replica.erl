@@ -2,62 +2,103 @@
 
 -export([start/2]).
 
-start(_, Name) ->
+start(_, Name) -> % El primer parametro es el pid del handler
     register(Name, self()),
     io:format("[start/2] Database [~p] created with PID: ~p.~n", [Name, self()]),
-    loop(Name, maps:new()).
+    listen(maps:new(), Name).
 
-loop(SelfName, Map) -> % SelfName es el atom con el que se registró
+listen(Map, SelfName) ->
     receive
         {put, Src, Key, Value, Timestamp} -> 
             case maps:find(Key, Map) of
                 error -> 
                     NewMap = maps:put(Key, {Value, Timestamp, false}, Map),
-                    Src ! {ok, NewMap},
-                    loop(SelfName, NewMap);
+                    Src ! {ok, SelfName},
+                    listen(NewMap, SelfName);
                 {ok, {_, TimestampStored, Deleted}} -> 
                     case (calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp) orelse Deleted) of
                         true -> 
                             NewMap = maps:update(Key, {Value, Timestamp, false}, Map),
-                            Src ! {ok, NewMap},
-                            loop(SelfName, Map);
+                            Src ! {ok, SelfName},
+                            listen(NewMap, SelfName);
                         false -> 
-                            Src ! {error, Map},
-                            loop(SelfName, Map)
+                            Src ! {error, SelfName},
+                            listen(Map, SelfName)
                     end
             end;
-        {put, Src, Key, Value, Timestamp, one, Coord, Replics} ->
-            case Coord == SelfName of
-                true ->
-                    io:format("[put/5] Soy ~p y soy el coordinador de la operación put.~n", [SelfName]),
-                    sendPutTo(Replics, Src, Key, Value, Timestamp)
+
+        {remove, Src, Key, Timestamp} -> 
+            case maps:find(Key, Map) of
+                error -> 
+                    Src ! {error, "No key found."};
+                {ok, {Value, TimestampStored, Deleted}} -> 
+                    case {calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp), Deleted} of
+                        {true, false} -> 
+                            NewMap = maps:update(Key, {Value, Timestamp, true}, Map),
+                            Src ! {ok, NewMap},
+                            listen(NewMap, SelfName);
+                        _ -> 
+                            Src ! {error, Map},
+                            listen(Map, SelfName)
+                    end
+            end;
+
+        {get, Src, Key} ->
+            case maps:find(Key, Map) of
+                error ->
+                    Src ! {notfound};
+                {ok, {Value, Timestamp, Deleted}} ->
+                    case Deleted of
+                        true ->
+                            Src ! {ko, Timestamp};
+                        false ->
+                            Src ! {ok, Value, Timestamp}
+                    end
             end,
-            Src ! {ok, ""},
-            loop(SelfName, Map);
-        % {put, Src, Key, Value, Timestamp, quorum, Coord, Replics} ->
-        %     case Coord == SelfName of
-        %         true ->
-        %             io:format("[put/5] Soy ~p y soy el coordinador de la operación put.~n", [SelfName])
-        %     end,
-        %     Src ! {ok, ""},
-        %     loop(SelfName, Map);
-        % {put, Src, Key, Value, Timestamp, all, Coord, Replics} ->
-        %     case Coord == SelfName of
-        %         true ->
-        %             io:format("[put/5] Soy ~p y soy el coordinador de la operación put.~n", [SelfName])
-        %     end,
-        %     Src ! {ok, ""},
-        %     loop(SelfName, Map);
-        {ok, _} ->
-            ok;
-        {error, _} ->
-            ok;
-        {_} ->
-            io:format("Soy el PID ~p y recibí un mensaje.", [self()]),
-            loop(SelfName, Map)
+            listen(Map, SelfName);
+
+        {size, Src} ->
+            Src ! {ok, maps:size(Map)},
+            listen(Map, SelfName);
+        {say, Src} ->
+            Src ! {ok, Map},
+            listen(Map, SelfName)
     end.
-sendPutTo([Last], Src, Key, Value, Timestamp) ->
-    Last ! {put, Src, Key, Value, Timestamp};
-sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
-    Head ! {put, Src, Key, Value, Timestamp},
-    sendPutTo(Tail, Src, Key, Value, Timestamp).
+
+
+% loop(SelfName, Map) -> % SelfName es el atom con el que se registró
+%     receive
+%         {put, Src, Key, Value, Timestamp} -> 
+%             case maps:find(Key, Map) of
+%                 error -> 
+%                     NewMap = maps:put(Key, {Value, Timestamp, false}, Map),
+%                     Src ! {ok, NewMap},
+%                     loop(SelfName, NewMap);
+%                 {ok, {_, TimestampStored, Deleted}} -> 
+%                     case (calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp) orelse Deleted) of
+%                         true -> 
+%                             NewMap = maps:update(Key, {Value, Timestamp, false}, Map),
+%                             Src ! {ok, NewMap},
+%                             loop(SelfName, Map);
+%                         false -> 
+%                             Src ! {error, Map},
+%                             loop(SelfName, Map)
+%                     end
+%             end;
+%         {_} ->
+%             loop(SelfName, Map)
+%     end.
+% sendPutTo([Last], Src, Key, Value, Timestamp) ->
+%     Last ! {put, Src, Key, Value, Timestamp};
+% sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
+%     Head ! {put, Src, Key, Value, Timestamp},
+%     sendPutTo(Tail, Src, Key, Value, Timestamp).
+
+% wait([]) ->
+%     ok;
+% wait(List) ->
+%     receive
+%         {ok, Src} ->
+%             NewList = lists:delete(Src, List),
+%             wait(NewList)
+%     end.

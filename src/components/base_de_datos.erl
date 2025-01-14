@@ -40,15 +40,24 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
             stopRep(AllReplicas),
             Src ! {ok, "All replicas stopped."},
             msgHandler(maps:new());
-        {put, Src, Key, Value, Timestamp, Consistency, Coord} ->
+        {put, Src, Key, Value, Timestamp, one, Coord} ->
             case whereis(Coord) of
                 undefined ->
-                    Src ! {error, "Coordinator doesn't exists."};
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
                 _ ->
                     Family = getFamily(Coord),
-                    Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
-            end,
-            msgHandler(Names)
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit([Coord], Src) end),
+                            sendPutTo(List, CoordPid, Key, Value, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
+            end
     end.
 
 create(_, 0, List) ->
@@ -93,14 +102,20 @@ put(Key, Value, Consistency, Coord)->
 put(Key, Value, Timestamp, Consistency, Coord) ->
     msgHandler ! {put, self(), Key, Value, Timestamp, Consistency, Coord},
     receive
-        {ok, _} ->
-            io:format("[put/5] Se insertó el par Clave-Valor.~n");
+        {ok, Reply} ->
+            io:format("[put/5] Se insertó el par Clave-Valor.~n~p", [Reply]);
         {error, _} ->
             io:format("[put/5] Error al insertar el par Clave-Valor.~n")
     end.
 
 say(Replica) -> % Es para probar que las replicas se encuentren activas, say(replica, mensaje) donde replica es un LIST! importante!
-    list_to_atom(Replica) ! {""}.
+    Replica ! {say, self()},
+    receive
+        {ok, Reply}->
+            io:format("[say/1] [~p] Map: ~p~n", [Replica, Reply]);
+        _ ->
+            ok
+    end.
 
 stopRep([]) ->
     io:format("Se detuvieron todas las replicas.~n");
@@ -118,3 +133,32 @@ stopRep([Head | Tail]) ->
 getFamily(Atom) ->
     String = atom_to_list(Atom),
     list_to_atom(hd(string:tokens(String, "-"))).
+
+sendPutTo([Last], Src, Key, Value, Timestamp) ->
+    Last ! {put, Src, Key, Value, Timestamp};
+sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
+    Head ! {put, Src, Key, Value, Timestamp},
+    sendPutTo(Tail, Src, Key, Value, Timestamp).
+
+coordInit([], Src) ->
+    Src ! {ok, "end"};
+coordInit(List, Src) ->
+    receive
+        {ok, ReplicName} ->
+            case lists:member(ReplicName, List) of
+                true ->
+                    NewList = lists:delete(ReplicName, List),
+                    coordInit(NewList, Src);
+                false ->
+                    coordInit(List, Src)
+            end;
+        {error, ReplicName} ->
+            case lists:member(ReplicName, List) of
+                true ->
+                    io:format("Error by ~p~n", [ReplicName]),
+                    NewList = lists:delete(ReplicName, List),
+                    coordInit(NewList, Src);
+                false ->
+                    coordInit(List, Src)
+            end
+    end.
