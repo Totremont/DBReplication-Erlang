@@ -50,7 +50,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit([Coord], Src) end),
+                            CoordPid = spawn(fun() -> coordInit([Coord], [], Src, one) end),
                             sendPutTo(List, CoordPid, Key, Value, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -103,7 +103,7 @@ put(Key, Value, Timestamp, Consistency, Coord) ->
     msgHandler ! {put, self(), Key, Value, Timestamp, Consistency, Coord},
     receive
         {ok, Reply} ->
-            io:format("[put/5] Se insertó el par Clave-Valor.~n~p", [Reply]);
+            io:format("[put/5] Se insertó el par Clave-Valor.~n[Coords] ~p~n", [Reply]);
         {error, _} ->
             io:format("[put/5] Error al insertar el par Clave-Valor.~n")
     end.
@@ -140,25 +140,27 @@ sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
     Head ! {put, Src, Key, Value, Timestamp},
     sendPutTo(Tail, Src, Key, Value, Timestamp).
 
-coordInit([], Src) ->
-    Src ! {ok, "end"};
-coordInit(List, Src) ->
+coordInit([], Accepted, Src, _) ->
+    Src ! {ok, Accepted};
+coordInit(Pending, Accepted, Src, one) ->
     receive
         {ok, ReplicName} ->
-            case lists:member(ReplicName, List) of
+            case lists:member(ReplicName, Pending) of
                 true ->
-                    NewList = lists:delete(ReplicName, List),
-                    coordInit(NewList, Src);
+                    NewList = lists:delete(ReplicName, Pending),
+                    NewAcc = [ReplicName | Accepted],
+                    coordInit(NewList, NewAcc, Src, one);
                 false ->
-                    coordInit(List, Src)
+                    coordInit(Pending, Accepted, Src, one)
             end;
         {error, ReplicName} ->
-            case lists:member(ReplicName, List) of
+            case lists:member(ReplicName, Pending) of
                 true ->
                     io:format("Error by ~p~n", [ReplicName]),
-                    NewList = lists:delete(ReplicName, List),
-                    coordInit(NewList, Src);
+                    NewList = lists:delete(ReplicName, Pending),
+                    NewAcc = [ReplicName | Accepted],
+                    coordInit(NewList, NewAcc, Src, one);
                 false ->
-                    coordInit(List, Src)
+                    coordInit(Pending, Accepted, Src, one)
             end
     end.
