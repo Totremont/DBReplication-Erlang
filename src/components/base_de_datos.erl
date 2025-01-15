@@ -1,6 +1,6 @@
 -module(base_de_datos).
 
--export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5]).
+-export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5, del/3, del/4]).
 
 init() ->
     Pid_msgHandler = spawn(fun() -> msgHandler(maps:new()) end),
@@ -93,6 +93,60 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                             Src ! {error, "Family not found"},
                             msgHandler(Names)
                     end
+            end;
+        {del, Src, Key, Timestamp, one, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit([Coord], [], Src, all) end),
+                            sendDelTo(List, CoordPid, Key, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
+            end;
+        {del, Src, Key, Timestamp, quorum, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit(List, [], Src, quorum) end),
+                            sendDelTo(List, CoordPid, Key, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
+            end;
+        {del, Src, Key, Timestamp, all, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInit(List, [], Src, all) end),
+                            sendDelTo(List, CoordPid, Key, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
             end
     end.
 
@@ -144,6 +198,17 @@ put(Key, Value, Timestamp, Consistency, Coord) ->
             io:format("[put/5] Error al insertar el par Clave-Valor.~n")
     end.
 
+del(Key, Consistency, Coord) ->
+    del(Key, calendar:local_time(), Consistency, Coord).
+del(Key, Timestamp, Consistency, Coord) ->
+    msgHandler ! {del, self(), Key, Timestamp, Consistency, Coord},
+    receive
+        {ok, Reply} ->
+            io:format("[put/5] Se eliminó la clave.~n[Coords] ~p~n", [Reply]);
+        {error, _} ->
+            io:format("[put/5] Error al eliminar la clave.~n")
+    end.
+
 say(Replica) -> % Es para probar que las replicas se encuentren activas, say(replica, mensaje) donde replica es un LIST! importante!
     Replica ! {say, self()},
     receive
@@ -175,6 +240,12 @@ sendPutTo([Last], Src, Key, Value, Timestamp) ->
 sendPutTo([Head | Tail], Src, Key, Value, Timestamp) ->
     Head ! {put, Src, Key, Value, Timestamp},
     sendPutTo(Tail, Src, Key, Value, Timestamp).
+
+sendDelTo([Last], Src, Key, Timestamp) ->
+    Last ! {remove, Src, Key, Timestamp};
+sendDelTo([Head | Tail], Src, Key, Timestamp) ->
+    Head ! {remove, Src, Key, Timestamp},
+    sendDelTo(Tail, Src, Key, Timestamp).
 
 coordInit([], Accepted, Src, one) ->
     Src ! {ok, Accepted};

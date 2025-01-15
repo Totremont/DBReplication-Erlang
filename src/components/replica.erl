@@ -30,15 +30,15 @@ listen(Map, SelfName) ->
         {remove, Src, Key, Timestamp} -> 
             case maps:find(Key, Map) of
                 error -> 
-                    Src ! {error, "No key found."};
+                    Src ! {error, SelfName};
                 {ok, {Value, TimestampStored, Deleted}} -> 
                     case {calendar:datetime_to_gregorian_seconds(TimestampStored) < calendar:datetime_to_gregorian_seconds(Timestamp), Deleted} of
                         {true, false} -> 
                             NewMap = maps:update(Key, {Value, Timestamp, true}, Map),
-                            Src ! {ok, NewMap},
+                            Src ! {ok, SelfName},
                             listen(NewMap, SelfName);
                         _ -> 
-                            Src ! {error, Map},
+                            Src ! {error, SelfName},
                             listen(Map, SelfName)
                     end
             end;
