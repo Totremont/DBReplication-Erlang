@@ -1,4 +1,4 @@
--module(main).
+-module(base_no_replicada).
 -export([start/0, start_monitor/0, loop/1]).
 -record(data,{status = present, value, timestamp}).  %%Status = present | removed
 
