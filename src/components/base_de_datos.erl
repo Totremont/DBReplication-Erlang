@@ -297,8 +297,8 @@ sendGetTo([Head | Tail], Src, Key) ->
 coordInit([], Accepted, Rejected, Src, one, Coord) ->
     case lists:member(Coord, Accepted) of
         true ->
-            sendCoR(Accepted ++ Rejected, ok),
-            Src ! {ok, Accepted};
+            sendCoR(Accepted ++ Rejected, ok);
+            %Src ! {ok, Accepted};
         false ->
             sendCoR(Accepted ++ Rejected, rollback),
             Src ! {error, Accepted}
@@ -306,8 +306,8 @@ coordInit([], Accepted, Rejected, Src, one, Coord) ->
 coordInit([], Accepted, Rejected, Src, quorum, _) ->
     case length(Accepted) > length(Rejected) of
         true ->
-            sendCoR(Accepted ++ Rejected, ok),
-            Src ! {ok, Accepted};
+            sendCoR(Accepted ++ Rejected, ok);
+            % Src ! {ok, Accepted};
         false ->
             sendCoR(Accepted ++ Rejected, rollback),
             Src ! {error, Accepted}
@@ -328,7 +328,19 @@ coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord) ->
                 true ->
                     NewList = lists:delete(ReplicName, Pending),
                     NewAcc = [ReplicName | Accepted],
-                    coordInit(NewList, NewAcc, Rejected, Src, Consistency, Coord);
+                    coordInit(NewList, NewAcc, Rejected, Src, Consistency, Coord),
+                    case ReplicName == Coord andalso Consistency == one of
+                        true ->
+                            Src ! {ok, NewAcc};
+                        false ->
+                            ok
+                    end,
+                    case (length(Accepted) > (length(Pending) + length(Rejected))) andalso Consistency == quorum of
+                        true ->
+                            Src ! {ok, NewAcc};
+                        false ->
+                            ok
+                    end;
                 false ->
                     coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord)
             end;
