@@ -56,16 +56,18 @@ listen(Map, SelfName) ->
         {get, Src, Key} ->
             case maps:find(Key, Map) of
                 error ->
-                    Src ! {notfound};
+                    Src ! {notfound, SelfName},
+                    listen(Map, SelfName);
                 {ok, {Value, Timestamp, Deleted}} ->
                     case Deleted of
                         true ->
-                            Src ! {ko, Timestamp};
+                            Src ! {ko, SelfName, Timestamp},
+                            listen(Map, SelfName);
                         false ->
-                            Src ! {ok, Value, Timestamp}
+                            Src ! {ok, SelfName, Value, Timestamp},
+                            listen(Map, SelfName)
                     end
-            end,
-            listen(Map, SelfName);
+            end;
 
         {size, Src} ->
             Src ! {ok, maps:size(Map)},

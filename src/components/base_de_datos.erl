@@ -9,7 +9,7 @@
 
 -module(base_de_datos).
 
--export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5, del/3, del/4]).
+-export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5, del/3, del/4, get/3]).
 
 init() ->
     Pid_msgHandler = spawn(fun() -> msgHandler(maps:new()) end),
@@ -113,7 +113,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit([Coord], [], [], Src, all, Coord) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [], Src, one, Coord) end),
                             sendDelTo(List, CoordPid, Key, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -151,6 +151,24 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                         {ok, List} when is_list(List) -> 
                             CoordPid = spawn(fun() -> coordInit(List, [], [], Src, all, Coord) end),
                             sendDelTo(List, CoordPid, Key, Timestamp),
+                            msgHandler(Names);
+                        error ->
+                            Src ! {error, "Family not found"},
+                            msgHandler(Names)
+                    end
+            end;
+        {get, Src, Key, one, Coord} ->
+            case whereis(Coord) of
+                undefined ->
+                    Src ! {error, "Coordinator doesn't exists."},
+                    msgHandler(Names);
+                _ ->
+                    Family = getFamily(Coord),
+                    % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
+                    case maps:find(Family, Names) of
+                        {ok, List} when is_list(List) -> 
+                            CoordPid = spawn(fun() -> coordInitGet(List, maps:new(), maps:new(), [], Src, one, Coord) end),
+                            sendGetTo(List, CoordPid, Key),
                             msgHandler(Names);
                         error ->
                             Src ! {error, "Family not found"},
@@ -217,6 +235,20 @@ del(Key, Timestamp, Consistency, Coord) ->
         {error, _} ->
             io:format("[put/5] Error al eliminar la clave.~n")
     end.
+get(Key, Consistency, Coord) ->
+    msgHandler ! {get, self(), Key, Consistency, Coord},
+    receive
+        {error, notfound} ->
+            io:format("[get/3] Not found.~n");
+        {error, _} ->
+            io:format("[get/3] Error.~n");
+        {ko, Timestamp} ->
+            io:format("[get/3] Key was deleted on ~p.~n", [Timestamp]);
+        {ok, Value, Timestamp} ->
+            io:format("[get/3] Ok! Value: ~p~nTimestamp: ~p~n", [Value,Timestamp]);
+        _ ->
+            io:format("[get/3] Default exit.~n")
+    end.
 
 say(Replica) -> % Es para probar que las replicas se encuentren activas, say(replica, mensaje) donde replica es un LIST! importante!
     Replica ! {say, self()},
@@ -255,6 +287,12 @@ sendDelTo([Last], Src, Key, Timestamp) ->
 sendDelTo([Head | Tail], Src, Key, Timestamp) ->
     Head ! {remove, Src, Key, Timestamp},
     sendDelTo(Tail, Src, Key, Timestamp).
+
+sendGetTo([Last], Src, Key) ->
+    Last ! {get, Src, Key};
+sendGetTo([Head | Tail], Src, Key) ->
+    Head ! {get, Src, Key},
+    sendGetTo(Tail, Src, Key).
 
 coordInit([], Accepted, Rejected, Src, one, Coord) ->
     case lists:member(Coord, Accepted) of
@@ -305,6 +343,63 @@ coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord) ->
                     coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord)
             end
     end.
+
+coordInitGet([], Ok, Ko, Nf, Src, one, Coord) ->
+    case lists:member(Coord, Nf) of
+        true ->
+            Src ! {error, notfound};
+        false ->
+            case maps:find(Coord, Ko) of
+                {ok, Timestamp} ->
+                    Src ! {ko, Timestamp};
+                error ->
+                    case maps:find(Coord, Ok) of
+                        {ok, {Value, Timestamp}} ->
+                            Src ! {ok, Value, Timestamp};
+                        error ->
+                            Src ! {error, ""}
+                    end
+            end
+    end;
+coordInitGet(Pending, Ok, Ko, Nf, Src, Consistency, Coord) -> %List: lista, Ok: Map, Ko: Map, Nf: lista
+    receive
+        {notfound, ReplicName} ->
+            case lists:member(ReplicName, Pending) of
+                true ->
+                    NewList = lists:delete(ReplicName, Pending),
+                    NewNf = [ReplicName | Nf],
+                    coordInitGet(NewList, Ok, Ko, NewNf, Src, Consistency, Coord);
+                false ->
+                    coordInitGet(Pending, Ok, Ko, Nf, Src, Consistency, Coord)
+            end;
+        {ko, ReplicName, Timestamp} ->
+            case lists:member(ReplicName, Pending) of
+                true ->
+                    NewList = lists:delete(ReplicName, Pending),
+                    NewKo = maps:put(ReplicName, Timestamp, Ko),
+                    coordInitGet(NewList, Ok, NewKo, Nf, Src, Consistency, Coord);
+                false ->
+                    coordInitGet(Pending, Ok, Ko, Nf, Src, Consistency, Coord)
+            end;
+        {ok, ReplicName, Value, Timestamp} ->
+            case lists:member(ReplicName, Pending) of
+                true ->
+                    NewList = lists:delete(ReplicName, Pending),
+                    NewOk = maps:put(ReplicName, {Value, Timestamp}, Ok),
+                    coordInitGet(NewList, NewOk, Ko, Nf, Src, Consistency, Coord);
+                false ->
+                    coordInitGet(Pending, Ok, Ko, Nf, Src, Consistency, Coord)
+            end
+    end.
+
+
+
+
+
+
+
+
+
 % coordInit(Pending, Accepted, Rejected, Src, quorum) ->
 %     case length(Accepted) >= length(Pending) of
 %         true ->
