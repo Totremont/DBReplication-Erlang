@@ -1,3 +1,12 @@
+% Consistencia: 
+%    Las replicas no manejan pedidos de manera concurrente, atienden las solicitudes a medidas que les va llegando.
+%    Si se realiza una operacion con 'all' si se pueden realizar otras operaciones mientras se espera la respuesta de
+%   otras replicas.
+%   
+%   Creo que es libre de deadlocks por como erlang implementa los receive y además, solo hay deadlocks cuando no se
+%  recibe un mensaje y el proceso queda bloqueado en un receive (pero en el código siempre se envian los mensajes correspondientes)
+
+
 -module(base_de_datos).
 
 -export([init/0, start/2, say/1, stop/0, stop/1, put/4, put/5, del/3, del/4]).
@@ -50,7 +59,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit([Coord], [], Src, one) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [],Src, one, Coord) end),
                             sendPutTo(List, CoordPid, Key, Value, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -68,7 +77,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit(List, [], Src, quorum) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [], Src, quorum, Coord) end),
                             sendPutTo(List, CoordPid, Key, Value, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -86,7 +95,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit(List, [], Src, all) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [], Src, all, Coord) end),
                             sendPutTo(List, CoordPid, Key, Value, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -104,7 +113,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit([Coord], [], Src, all) end),
+                            CoordPid = spawn(fun() -> coordInit([Coord], [], [], Src, all, Coord) end),
                             sendDelTo(List, CoordPid, Key, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -122,7 +131,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit(List, [], Src, quorum) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [], Src, quorum, Coord) end),
                             sendDelTo(List, CoordPid, Key, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -140,7 +149,7 @@ msgHandler(Names) -> % Names es un map que contiene el nombre de la replica y la
                     % Coord ! {put, Src, Key, Value, Timestamp, Consistency, Coord, maps:find(Family, Names)}
                     case maps:find(Family, Names) of
                         {ok, List} when is_list(List) -> 
-                            CoordPid = spawn(fun() -> coordInit(List, [], Src, all) end),
+                            CoordPid = spawn(fun() -> coordInit(List, [], [], Src, all, Coord) end),
                             sendDelTo(List, CoordPid, Key, Timestamp),
                             msgHandler(Names);
                         error ->
@@ -247,81 +256,112 @@ sendDelTo([Head | Tail], Src, Key, Timestamp) ->
     Head ! {remove, Src, Key, Timestamp},
     sendDelTo(Tail, Src, Key, Timestamp).
 
-coordInit([], Accepted, Src, one) ->
-    Src ! {ok, Accepted};
-coordInit(Pending, Accepted, Src, one) ->
+coordInit([], Accepted, Rejected, Src, one, Coord) ->
+    case lists:member(Coord, Accepted) of
+        true ->
+            sendCoR(Accepted ++ Rejected, ok),
+            Src ! {ok, Accepted};
+        false ->
+            sendCoR(Accepted ++ Rejected, rollback),
+            Src ! {error, Accepted}
+    end;
+coordInit([], Accepted, Rejected, Src, quorum, _) ->
+    case length(Accepted) > length(Rejected) of
+        true ->
+            sendCoR(Accepted ++ Rejected, ok),
+            Src ! {ok, Accepted};
+        false ->
+            sendCoR(Accepted ++ Rejected, rollback),
+            Src ! {error, Accepted}
+    end;
+coordInit([], Accepted, Rejected, Src, all, _) ->
+    case length(Rejected) == 0 of
+        true ->
+            sendCoR(Accepted ++ Rejected, ok),
+            Src ! {ok, Accepted};
+        false ->
+            sendCoR(Accepted ++ Rejected, rollback),
+            Src ! {error, Accepted}
+    end;
+coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord) ->
     receive
         {ok, ReplicName} ->
             case lists:member(ReplicName, Pending) of
                 true ->
                     NewList = lists:delete(ReplicName, Pending),
                     NewAcc = [ReplicName | Accepted],
-                    coordInit(NewList, NewAcc, Src, one);
+                    coordInit(NewList, NewAcc, Rejected, Src, Consistency, Coord);
                 false ->
-                    coordInit(Pending, Accepted, Src, one)
+                    coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord)
             end;
         {error, ReplicName} ->
             case lists:member(ReplicName, Pending) of
                 true ->
                     io:format("Error by ~p~n", [ReplicName]),
                     NewList = lists:delete(ReplicName, Pending),
-                    NewAcc = [ReplicName | Accepted],
-                    coordInit(NewList, NewAcc, Src, one);
+                    NewRej = [ReplicName | Rejected],
+                    coordInit(NewList, Accepted, NewRej, Src, Consistency, Coord);
                 false ->
-                    coordInit(Pending, Accepted, Src, one)
-            end
-    end;
-coordInit(Pending, Accepted, Src, quorum) ->
-    case length(Accepted) >= length(Pending) of
-        true ->
-            Src ! {ok, Accepted};
-        false ->
-            receive
-                {ok, ReplicName} ->
-                    case lists:member(ReplicName, Pending) of
-                        true ->
-                            NewList = lists:delete(ReplicName, Pending),
-                            NewAcc = [ReplicName | Accepted],
-                            coordInit(NewList, NewAcc, Src, quorum);
-                        false ->
-                            coordInit(Pending, Accepted, Src, quorum)
-                    end;
-                {error, ReplicName} ->
-                    case lists:member(ReplicName, Pending) of
-                        true ->
-                            io:format("Error by ~p~n", [ReplicName]),
-                            NewList = lists:delete(ReplicName, Pending),
-                            NewAcc = [ReplicName | Accepted],
-                            coordInit(NewList, NewAcc, Src, quorum);
-                        false ->
-                            coordInit(Pending, Accepted, Src, quorum)
-                    end
-            end
-    end;
-coordInit(Pending, Accepted, Src, all) ->
-    case length(Pending) == 0 of
-        true ->
-            Src ! {ok, Accepted};
-        false ->
-            receive
-                {ok, ReplicName} ->
-                    case lists:member(ReplicName, Pending) of
-                        true ->
-                            NewList = lists:delete(ReplicName, Pending),
-                            NewAcc = [ReplicName | Accepted],
-                            coordInit(NewList, NewAcc, Src, all);
-                        false ->
-                            coordInit(Pending, Accepted, Src, all)
-                    end;
-                {error, ReplicName} ->
-                    case lists:member(ReplicName, Pending) of
-                        true ->
-                            io:format("Error by ~p~n", [ReplicName]),
-                            NewList = lists:delete(ReplicName, Pending),
-                            NewAcc = [ReplicName | Accepted],
-                            coordInit(NewList, NewAcc, Src, all);
-                        false ->
-                            coordInit(Pending, Accepted, Src, all)
-                    end
+                    coordInit(Pending, Accepted, Rejected, Src, Consistency, Coord)
             end
     end.
+% coordInit(Pending, Accepted, Rejected, Src, quorum) ->
+%     case length(Accepted) >= length(Pending) of
+%         true ->
+%             Src ! {ok, Accepted};
+%         false ->
+%             receive
+%                 {ok, ReplicName} ->
+%                     case lists:member(ReplicName, Pending) of
+%                         true ->
+%                             NewList = lists:delete(ReplicName, Pending),
+%                             NewAcc = [ReplicName | Accepted],
+%                             coordInit(NewList, NewAcc, Src, quorum);
+%                         false ->
+%                             coordInit(Pending, Accepted, Src, quorum)
+%                     end;
+%                 {error, ReplicName} ->
+%                     case lists:member(ReplicName, Pending) of
+%                         true ->
+%                             io:format("Error by ~p~n", [ReplicName]),
+%                             NewList = lists:delete(ReplicName, Pending),
+%                             NewAcc = [ReplicName | Accepted],
+%                             coordInit(NewList, NewAcc, Src, quorum);
+%                         false ->
+%                             coordInit(Pending, Accepted, Src, quorum)
+%                     end
+%             end
+%     end;
+% coordInit(Pending, Accepted, Rejected, Src, all) ->
+%     case length(Pending) == 0 of
+%         true ->
+%             Src ! {ok, Accepted};
+%         false ->
+%             receive
+%                 {ok, ReplicName} ->
+%                     case lists:member(ReplicName, Pending) of
+%                         true ->
+%                             NewList = lists:delete(ReplicName, Pending),
+%                             NewAcc = [ReplicName | Accepted],
+%                             coordInit(NewList, NewAcc, Src, all);
+%                         false ->
+%                             coordInit(Pending, Accepted, Src, all)
+%                     end;
+%                 {error, ReplicName} ->
+%                     case lists:member(ReplicName, Pending) of
+%                         true ->
+%                             io:format("Error by ~p~n", [ReplicName]),
+%                             NewList = lists:delete(ReplicName, Pending),
+%                             NewAcc = [ReplicName | Accepted],
+%                             coordInit(NewList, NewAcc, Src, all);
+%                         false ->
+%                             coordInit(Pending, Accepted, Src, all)
+%                     end
+%             end
+%     end.
+
+sendCoR([], _) ->
+    ok;
+sendCoR([Head | Tail], Reply) ->
+    Head ! {Reply},
+    sendCoR(Tail, Reply).

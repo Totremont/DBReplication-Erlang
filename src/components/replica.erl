@@ -20,7 +20,12 @@ listen(Map, SelfName) ->
                         true -> 
                             NewMap = maps:update(Key, {Value, Timestamp, false}, Map),
                             Src ! {ok, SelfName},
-                            listen(NewMap, SelfName);
+                            receive
+                                {ok}->
+                                    listen(NewMap, SelfName);
+                                {rollback} ->
+                                    listen(Map, SelfName)
+                            end;
                         false -> 
                             Src ! {error, SelfName},
                             listen(Map, SelfName)
@@ -36,7 +41,12 @@ listen(Map, SelfName) ->
                         {true, false} -> 
                             NewMap = maps:update(Key, {Value, Timestamp, true}, Map),
                             Src ! {ok, SelfName},
-                            listen(NewMap, SelfName);
+                            receive
+                                {ok}->
+                                    listen(NewMap, SelfName);
+                                {rollback} ->
+                                    listen(Map, SelfName)
+                            end;
                         _ -> 
                             Src ! {error, SelfName},
                             listen(Map, SelfName)
