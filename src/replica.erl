@@ -6,7 +6,10 @@
 % Returns {status,Name} ; status :: ok | name_taken
 start(Pid,Name,Group) -> 
     try register(Name,self()), link(Pid) of
-      true -> Pid ! {ok,Name}, listen(Name, Group, maps:new())
+      true -> 
+        Pid ! {ok,Name}, 
+        Timeout = selective:nextTimeout(),
+        listen(Name, Group, maps:new(),gb_trees:empty(),Timeout,maps:new())
     catch
       _:_ -> Pid ! {name_taken, Name}
     end.
@@ -20,10 +23,10 @@ stop(Name) ->
 % Expects: {Pid,Ref,{operation,Params},consistency} ; Consistency :: {all,quorum,one}
 % Returns 'repl' :: {ref,Response,Timestamp} ; Response :: {status, Database, optionalResult}
 % Or also {Ref,timeout}
-listen(Name, Group, Database) -> 
+listen(Name, Group, Queue, Table, Timeout, Database) -> 
   receive
     {Pid, Ref, Work = {Operation, Params}, Consistency} -> 
-      Queue = resend(Work,Group,Consistency),
+      Pending = resend(Work,Group,Consistency),
       MyResult =
       case Operation of
         put -> operators:put(Params, Database);
@@ -41,17 +44,14 @@ listen(Name, Group, Database) ->
           #data{timestamp = SavedTime} -> SavedTime;
           _ -> calendar:local_time() end
       },
-      case wait(Queue,MyResponse) of  
-        timeout -> 
-          Pid ! {Ref,timeout}, listen(Name, Group,Database);
-        BestResponse -> 
-          Pid ! BestResponse#repl{ref = Ref}   
-      end,
+      {NewTable, NewQueue, NewOut} = selective:savePending(Pid, MyResponse, Ref, Pending, Queue, Table),
       if Consistency =:= quorum ->
         listen(Name, operators:shuffle(Group), NewState);  % Randomize group
       true -> 
         listen(Name, Group, NewState)
       end;
+
+    Confirm = #repl{} -> selective:onConfirm(Confirm, Table, Queue);
 
     Unknown -> 
       file:write_file(
@@ -59,6 +59,8 @@ listen(Name, Group, Database) ->
         io_lib:fwrite("(~p) INFO: process [~p] received unknown message: ~p\n", [calendar:local_time(), Name,Unknown]),
         [append]
       )
+  after Timeout ->
+    selective:purge(Table, Queue)
   end.
 
 
@@ -66,19 +68,18 @@ listen(Name, Group, Database) ->
 
 
 % Forward work to the group
-resend(Work,Group,Consistency) -> resend(Work,Group,Consistency,[]).
+resend(Work,Ref,Group,Consistency) -> resend(Work,Ref,Group,Consistency,[]).
 
-resend(_,_,one,Queue) -> Queue;
-resend(_,[],_,Queue) -> Queue;
+resend(_,_,_,one,Queue) -> Queue;
+resend(_,_,[],_,Queue) -> Queue;
 
-resend(Work, [H | Rest], Consistency, Queue) -> 
-  Ref = make_ref(),
+resend(Work, Ref, [H | Rest], Consistency, Queue) -> 
   H ! {self(), Ref, Work, one},
   if Consistency =:= quorum andalso length(Rest) > 0  ->
     [_D | T] = Rest,
-    resend(Work, T, Consistency, [Ref | Queue]);  % Take two elements per iteration
+    resend(Work,Ref, T, Consistency, [H | Queue]);  % Take two elements per iteration
   true -> 
-    resend(Work, Rest, Consistency, [Ref | Queue])
+    resend(Work,Ref, Rest, Consistency, [H | Queue])
   end.
 
 % Wait for confirmations returns {Response, BestTime} | abort | timeout
