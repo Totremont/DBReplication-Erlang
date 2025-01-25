@@ -2,7 +2,7 @@
 -define(DASH, 45).      % "-" symbol
 -define(WAIT,5000).
 -define(OFFSET,48).     % Offset to get character encode.
--export([start/2]).
+-export([start/2,startWithDummy/2]).
 
 %% Args: FamilyName, N
 %% Returns: {ok, Refs, Group} ; Refs :: map() key : name ; value : Ref ({Pid,Ref})
@@ -14,6 +14,14 @@ start(Family,N) ->
     {ok,Refs} = startProcesses(Group),                   % Spawn processes
     {wait(Refs),Refs,Group}.                            % Wait for confirmation
 
+% Start with dummy process that never returns
+startWithDummy(Family,N) -> 
+    {ok,Group} = setNames(Family,N),                     
+    GroupDummy = [dummy | Group],
+    {ok,Refs} = startProcesses(GroupDummy,Group,maps:new()),
+    DummyRef = spawn_monitor(replica,dummy,[self()]),
+    Refs2 = maps:put(dummy,DummyRef,Refs),   
+    {wait(Refs2),Refs2,GroupDummy}.                            
 
 %% Implementations
 wait(Refs) -> 

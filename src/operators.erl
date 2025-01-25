@@ -1,6 +1,6 @@
 -module(operators).
 -include("types.hrl").
--export([put/2,delete/2,get/2,size/1,getNewerDate/2,shuffle/1]).
+-export([put/2,delete/2,get/2,size/1,inspect/1,getNewerDate/2,shuffle/1]).
 
 % Returns {status,Database,#data}
 put({Key,Value,Timestamp}, Database) ->
@@ -24,7 +24,7 @@ delete({Key,Timestamp},Database) ->
             case canOverride(Data,Timestamp) of
                 true -> 
                     NewData = Data#data{status = removed, timestamp = Timestamp},
-                    {ok,maps:update(Key, NewData, Database),Timestamp};
+                    {ok,maps:update(Key, NewData, Database),NewData};
                 false -> {ko,Database, Data}
             end;
         _ -> {notfound,Database,nil}
@@ -37,7 +37,12 @@ get(Key,Database) ->
         _ -> {notfound,Database,nil}
     end.
 
-size(Database) -> {ok,Database,maps:size(Database)}.
+size(Database) ->
+    PresentEntries = maps:filter(fun(_,#data{status = Status}) -> Status =:= present end,Database),
+    {ok,Database,maps:size(PresentEntries)}.
+
+%% Get database info
+inspect(Database) -> {ok,Database,Database}.
 
 
 % Utils

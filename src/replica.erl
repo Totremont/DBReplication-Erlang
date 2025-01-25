@@ -1,5 +1,5 @@
 -module(replica).
--export([start/3,stop/1]).
+-export([start/3,stop/1,dummy/1]).
 -include("types.hrl").
 
 % Returns {status,Name} ; status :: ok | name_taken
@@ -33,7 +33,8 @@ listen(Name, Group, Queue, ConfirmServer, Database) ->
         put -> operators:put(Params, Database);
         delete -> operators:delete(Params, Database);
         get -> operators:get(Params, Database);
-        size -> operators:size(Database)
+        size -> operators:size(Database);
+        inspect -> operators:inspect(Database)
       end,
       {_Status,NewState,NewData} = MyResult,
       MyResponse = #repl
@@ -88,8 +89,20 @@ resend(Work, Ref, [H | Rest], Consistency, Queue) ->
     resend(Work,Ref, Rest, Consistency, if Pending =/= nil -> [H | Queue]; true -> Queue end) 
   end.
 
-dummy() ->
-  register(dummy,self()),
+dummy(Pid) ->
+  try register(dummy,self()), link(Pid) of
+    true -> 
+      Pid ! {ok,dummy},
+      dummyLoop()
+  catch
+    _:_ -> {name_taken,dummy}
+  end.
+
+dummyLoop() ->
   receive
-  shutdown -> exit(self())
+  S -> 
+    if S =:= shutdown -> exit(normal);
+      true ->
+        dummyLoop()
+    end
   end.

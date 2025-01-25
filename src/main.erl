@@ -1,6 +1,6 @@
 -module(main).
 -define(WAIT, 5000).
--export([init/0,start/2,shutdown/0,stop/1,stop/0,familyInfo/1,put/3,get/3,delete/3,size/2]).
+-export([init/0,start/2,startWithDummy/2,shutdown/0,stop/1,stop/0,familyInfo/1,put/3,get/3,delete/3,size/2,inspect/1]).
 -include("types.hrl").
 
 
@@ -15,6 +15,9 @@ init() ->
         
 start(Name,N) ->
     call({self(),start,{Name,N}}).
+
+startWithDummy(Name,N) ->
+    call({self(),start_dummy,{Name,N}}).
 
 stop(Name) ->
     call({self(),stop,Name}).
@@ -46,6 +49,9 @@ size(Lider,Consistency) ->
     Ref = make_ref(),
     call({self(),size,{},Lider,Consistency,Ref}).
 
+inspect(Lider) ->
+    Ref = make_ref(),
+    call({self(),inspect,{},Lider,one,Ref}).
 call(Request) -> 
     case whereis(coordinator) of
         undefined -> {error,"No coordinator found. Call init() to get a new instance."};
@@ -83,6 +89,19 @@ loop(State) ->
                     {timeout,_,_} -> Pid ! {error,start,{Family,N}}
                 end;
             true -> Pid ! {invalid_args,start,{Family,N}}
+            end;
+
+        {Pid,start_dummy,{Family,N}} ->
+            if (is_atom(Family) andalso N >= 0) ->
+                case spawner:startWithDummy(Family,N) of
+                    {ok,Refs,Group} -> 
+                        NewState = saveState(State, Family, Refs),
+                        Pid ! {ok,start_dummy,{Family,Group}},
+                        loop(NewState);
+                    {name_taken,_,_} -> Pid ! {name_taken,start_dummy,{Family,N}};
+                    {timeout,_,_} -> Pid ! {error,start_dummy,{Family,N}}
+                end;
+            true -> Pid ! {invalid_args,start_dummy,{Family,N}}
             end;
 
         % Stop a family
@@ -124,8 +143,11 @@ loop(State) ->
             if is_integer(Result) -> Pid ! {{Status,Result,Name,Timestamp},Ref};
             Result =:= nil -> Pid ! {{Status,Name,Timestamp},Ref};
             % It's #data
-            true -> Pid ! {{Status,Result#data.value,Name,Timestamp},Ref}
+            true -> Pid ! {{Status,Result,Name},Ref}
             end;
+        % Timeout from replica
+        {{Pid,Ref},timeout} ->
+            Pid ! {timeout,Ref};
         
         % Someone died. Eliminate it from list.
         {'DOWN',_,process,Pid,_} -> 

@@ -36,7 +36,7 @@ onConfirm(NewResponse = #repl{ref = Ref, name = Identity, timestamp = NewTime}, 
                 Pid ! UpdatedResponse,
                 maps:remove(Ref, Queue);
             true ->
-                maps:put(Ref,{Pid,UpdatedPending,UpdatedResponse})
+                maps:put(Ref,{Pid,UpdatedPending,UpdatedResponse},Queue)
             end;
         % Deleted by a purge. Drop message
         error -> Queue
