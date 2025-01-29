@@ -20,7 +20,7 @@ stop(Name) ->
   end.
 
 % Expects: {Pid,Ref,{operation,Params},consistency} ; Consistency :: {all,quorum,one}
-% Returns 'repl' :: {ref,Response,Timestamp} ; Response :: {status, Database, optionalResult}
+% Returns 'repl' :: {ref,Response,Timestamp} ; Response :: {status, Database, #data}
 % Or also {Ref,timeout}
 listen(Name, Group, Queue, ConfirmServer, Database) -> 
 

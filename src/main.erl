@@ -134,17 +134,18 @@ loop(State) ->
                 {ok,{_,_,_}} ->
                     % Pass client's Pid and Ref
                     Rpid ! {self(), {Pid,Ref}, {Operation, Params}, Consistency},
-                    Pid ! {ok,Operation,Params,Consistency,Lider,Ref};
-                _ -> Pid ! {lider_notfound,Operation,Lider}
+                    Pid ! {ok,Ref};
+                _ -> Pid ! {lider_notfound,Lider}
             end;
         
         % Response from replica received
-        #repl{ref = {Pid,Ref}, response = {Status,_,Result}, name = Name,timestamp = Timestamp} ->
-            if is_integer(Result) -> Pid ! {{Status,Result,Name,Timestamp},Ref};
-            Result =:= nil -> Pid ! {{Status,Name,Timestamp},Ref};
+        Res = #repl{ref = {Pid,Ref}, response = {Status,_,Result}, name = Name,timestamp = Timestamp} ->
+            %%if is_integer(Result) -> Pid ! {{Status,Result,Name,Timestamp},Ref};
+            %%Result =:= nil -> Pid ! {{Status,Name,Timestamp},Ref};
             % It's #data
-            true -> Pid ! {{Status,Result,Name},Ref}
-            end;
+            %%true -> Pid ! Res
+            Pid ! Res;
+            %%end;
         % Timeout from replica
         {{Pid,Ref},timeout} ->
             Pid ! {timeout,Ref};

@@ -5,6 +5,7 @@
 
 now() -> calendar:local_time().
 
-daysFromNow(Days) -> calendar:gregorian_days_to_date(
-    calendar:date_to_gregorian_days(calendar:local_time()) + Days).
+daysFromNow(Days) -> 
+    calendar:gregorian_seconds_to_datetime(
+        calendar:datetime_to_gregorian_seconds(calendar:local_time()) + 60*60*24*Days).
 
