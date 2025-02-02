@@ -46,7 +46,7 @@ listen(Name, Group, Queue, ConfirmServer, Database) ->
           #data{timestamp = SavedTime} -> SavedTime;
           _ -> calendar:local_time() end  % size() method
       },
-      NewQueue = confirm:saveRequest(Pid, MyResponse, Ref, Pending, Queue, ConfirmServer),
+      NewQueue = confirm:saveRequest(Pid, MyResponse, Pending, Queue, ConfirmServer),
       listen(
         Name, if Consistency =:= quorum -> operators:shuffle(Group); true -> Group end,
         NewQueue,ConfirmServer,NewState

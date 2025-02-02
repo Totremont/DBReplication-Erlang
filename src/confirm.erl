@@ -1,7 +1,7 @@
 -module(confirm).
 -include("types.hrl").
 -define(TIMEOFFSET, 5). % 5 seconds
--export([init/0,onConfirm/2,saveRequest/6,purge/2]).
+-export([init/0,onConfirm/2,saveRequest/5,purge/2]).
 
 % Returns new {Table,Queue,Timeout}
 init() -> 
@@ -9,7 +9,7 @@ init() ->
     spawn_link(fun() -> server(Self,gb_trees:empty(),infinity) end).
 
 % Save requests that have pending confirmation messages.    
-saveRequest(ClientPid,MyResponse,Ref,Group,Queue,ConfirmServer) ->
+saveRequest(ClientPid,MyResponse = #repl{ref = Ref},Group,Queue,ConfirmServer) ->
     if Group =:= [] ->
         ClientPid ! MyResponse,
         Queue;

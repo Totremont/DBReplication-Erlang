@@ -139,13 +139,14 @@ loop(State) ->
             end;
         
         % Response from replica received
-        Res = #repl{ref = {Pid,Ref}, response = {Status,_,Result}, name = Name,timestamp = Timestamp} ->
-            %%if is_integer(Result) -> Pid ! {{Status,Result,Name,Timestamp},Ref};
-            %%Result =:= nil -> Pid ! {{Status,Name,Timestamp},Ref};
-            % It's #data
-            %%true -> Pid ! Res
-            Pid ! Res;
-            %%end;
+        #repl{ref = {Pid,Ref}, response = {Status,_,Result}, name = Name,timestamp = Timestamp} ->
+            Pid ! #coord{
+                ref = Ref, 
+                status = Status, 
+                timestamp = Timestamp,
+                sender = Name,
+                result = Result
+            };
         % Timeout from replica
         {{Pid,Ref},timeout} ->
             Pid ! {timeout,Ref};

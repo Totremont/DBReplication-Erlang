@@ -24,7 +24,7 @@ start() ->
     io:format("\n4. Store a value with key '3' on 'enode-3' with consistency 'one'"),
     {ok,Ref} = main:put({3,system0,time:now()},'enode-3',one),
     receive
-      #repl{ref = {_,Ref}, response = {ok,_,_}} -> ok
+      #coord{ref = Ref, status = ok } -> ok
     after ?WAIT -> throw(timeout)
     end,
     io:format("\n4. ✓ Ok"),
@@ -32,23 +32,23 @@ start() ->
     io:format("\n5. Store a value with key '5' on 'enode-3' with consistency 'quorum'"),
     {ok,Ref2} = main:put({5,system0,time:now()},'enode-3',quorum),
     receive
-      #repl{ref = {_,Ref2}, response = {ok,_,_}} -> ok
-      after ?WAIT -> throw(timeout)
+      #coord{ref = Ref2, status = ok } -> ok
+    after ?WAIT -> throw(timeout)
     end,
     io:format("\n5. ✓ Ok"),
 
     io:format("\n6. Store a value with key '5' on 'alpha-1' with consistency 'all'"),
     {ok,Ref3} = main:put({5,system0,time:now()},'alpha-1',all),
     receive
-      #repl{ref = {_,Ref3},response = {ok,_,_}} -> ok
-      after ?WAIT -> throw(timeout)
+      #coord{ref = Ref3, status = ok } -> ok
+    after ?WAIT -> throw(timeout)
     end,
     io:format("\n6. ✓ Ok"),
 
     io:format("\n7. Update key '3' with lower timestamp on 'enode-3' and expect: ko"),  
     {ok,Ref4} = main:put({3,system0,time:daysFromNow(-3)},'enode-3',one),
     receive
-      #repl{ref = {_,Ref4},response = {ko,_,_}} -> ok
+      #coord{ref = Ref4, status = ko } -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n7. ✓ Ok"),
@@ -56,7 +56,7 @@ start() ->
     io:format("\n8. Update key '3' with higher timestamp on 'enode-3' and expect: ok"), 
     {ok,Ref5} = main:put({3,system1,time:daysFromNow(1)},'enode-3',one),
     receive
-      #repl{ref = {_,Ref5},response = {ok,_,_}} -> ok
+      #coord{ref = Ref5, status = ok } -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n8. ✓ Ok"),
@@ -64,17 +64,17 @@ start() ->
     io:format("\n9. Ask database size on all 'alpha' family members and expect values: 1,1,1"),
     {ok,Ref6} = main:size('alpha-3',one),
     receive
-      #repl{ref = {_,Ref6},response = {ok,_,1}} -> ok
+      #coord{ref = Ref6, status = ok, result = 1 } -> ok
       after ?WAIT -> throw(timeout)
     end,
     {ok,Ref7} = main:size('alpha-2',one),
     receive
-      #repl{ref = {_,Ref7},response = {ok,_,1}} -> ok
+      #coord{ref = Ref7, status = ok, result = 1 } -> ok
       after ?WAIT -> throw(timeout)
     end,
     {ok,Ref8} = main:size('alpha-1',one),
     receive
-      #repl{ref = {_,Ref8},response = {ok,_,1}} -> ok
+      #coord{ref = Ref8, status = ok, result = 1 } -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n9. ✓ Ok"),
@@ -84,19 +84,19 @@ start() ->
     {ok,Ref9} = main:size('enode-1',one),
     Exp2 = 
     receive
-      #repl{ref = {_,Ref9},response = {ok,_,Val}} -> lists:delete(Val, Exp1)
+      #coord{ref = Ref9, status = ok, result = Val } -> lists:delete(Val, Exp1)
       after ?WAIT -> throw(timeout)
     end,
     {ok,Ref10} = main:size('enode-2',one),
     Exp3 = 
     receive
-      #repl{ref = {_,Ref10},response = {ok,_,Val2}} -> lists:delete(Val2, Exp2)
+      #coord{ref = Ref10, status = ok, result = Val2 } -> lists:delete(Val2, Exp2)
       after ?WAIT -> throw(timeout)
     end,
     {ok,Ref11} = main:size('enode-3',one),
     Exp4 = 
     receive
-      #repl{ref = {_,Ref11},response = {ok,_,Val3}} -> lists:delete(Val3, Exp3)
+      #coord{ref = Ref11, status = ok, result = Val3 } -> lists:delete(Val3, Exp3)
       after ?WAIT -> throw(timeout)
     end,
     if Exp4 =:= [] ->
@@ -107,7 +107,7 @@ start() ->
     io:format("\n11. Attempt to delete a key '3' on 'alpha-1' and expect: notfound"),
     {ok,Ref12} = main:delete({3,time:now()},'alpha-1',one),
     receive
-      #repl{ref = {_,Ref12},response = {notfound,_,_}} -> ok
+      #coord{ref = Ref12, status = notfound} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n11. ✓ Ok"),
@@ -115,7 +115,7 @@ start() ->
     io:format("\n12. Attempt to delete a key '5' on 'alpha-1' with lower timestamp and expect: ko"),
     {ok,Ref13} = main:delete({5,time:daysFromNow(-5)},'alpha-1',one),
     receive
-      #repl{ref = {_,Ref13},response = {ko,_,_}} -> ok
+      #coord{ref = Ref13, status = ko} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n12. ✓ Ok"),
@@ -123,7 +123,7 @@ start() ->
     io:format("\n13. Attempt to delete a key '5' on 'alpha-1' with higher timestamp and consistency 'all' and expect: ok"),
     {ok,Ref14} = main:delete({5,time:daysFromNow(2)},'alpha-1',all),
     receive
-      #repl{ref = {_,Ref14},response = {ok,_,_}} -> ok
+      #coord{ref = Ref14, status = ok} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n13. ✓ Ok"),
@@ -131,7 +131,7 @@ start() ->
     io:format("\n14. Attempt to delete a key '5' on 'alpha-2' with higher timestamp and expect: ko (logically removed)"),
     {ok,Ref15} = main:delete({5,time:daysFromNow(3)},'alpha-2',one),
     receive
-      #repl{ref = {_,Ref15},response = {ko,_,_}} -> ok
+      #coord{ref = Ref15, status = ko} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n14. ✓ Ok"),
@@ -139,7 +139,7 @@ start() ->
     io:format("\n15. Store a key '5' on 'alpha-3' with lower timestamp and expect: ko"),
     {ok,Ref16} = main:put({5,system2,time:daysFromNow(-3)},'alpha-3',one),
     receive
-      #repl{ref = {_,Ref16},response = {ko,_,_}} -> ok
+      #coord{ref = Ref16, status = ko} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n15. ✓ Ok"),
@@ -147,7 +147,7 @@ start() ->
     io:format("\n16. Ask database size on 'alpha-1' with consistency 'quorum' and expect: 0"),
     {ok,Ref17} = main:size('alpha-1',quorum),
     receive
-      #repl{ref = {_,Ref17},response = {ok,_,0}} -> ok
+      #coord{ref = Ref17, status = ok, result = 0} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n16. ✓ Ok"),
@@ -155,7 +155,7 @@ start() ->
     io:format("\n17. Get value with key '5' on 'alpha-3' and expect: ko (logically removed)"),
     {ok,Ref18} = main:get(5,'alpha-3',one),
     receive
-      #repl{ref = {_,Ref18},response = {ko,_,_}} -> ok
+      #coord{ref = Ref18, status = ko} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n17. ✓ Ok"),
@@ -163,7 +163,7 @@ start() ->
     io:format("\n18. Get value with key '3' on 'enode-1' and expect: notfound"),
     {ok,Ref20} = main:get(3,'enode-1',one),
     receive
-      #repl{ref = {_,Ref20},response = {notfound,_,_}} -> ok
+      #coord{ref = Ref20, status = notfound} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n18. ✓ Ok"),
@@ -171,7 +171,7 @@ start() ->
     io:format("\n19. Get value with key '3' on 'enode-3' and expect: ok"),
     {ok,Ref21} = main:get(3,'enode-3',one),
     receive
-      #repl{ref = {_,Ref21},response = {ok,_,_}} -> ok
+      #coord{ref = Ref21, status = ok} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n19. ✓ Ok"),
@@ -184,7 +184,7 @@ start() ->
     io:format("\n21. Store a value with key '8' on 'beta-2' with consistency 'one'"),
     {ok,Ref22} = main:put({8,system0,time:now()},'beta-2',one),
     receive
-      #repl{ref = {_,Ref22},response = {ok,_,_}} -> ok
+      #coord{ref = Ref22, status = ok} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n21. ✓ Ok"),
@@ -192,7 +192,7 @@ start() ->
     io:format("\n22. Get value with key '8' on 'beta-2' with consistency 'one' and expect: ok"),
     {ok,Ref23} = main:get(8,'beta-2',one),
     receive
-      #repl{ref = {_,Ref23},response = {ok,_,_}} -> ok
+      #coord{ref = Ref23, status = ok} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n22. ✓ Ok"),
@@ -208,7 +208,7 @@ start() ->
     io:format("\n24. Get value with key '8' on 'beta-3' with consistency 'one' and expect: notfound"),
     {ok,Ref25} = main:get(8,'beta-3',one),
     receive
-      #repl{ref = {_,Ref25},response = {notfound,_,_}} -> ok
+      #coord{ref = Ref25, status = notfound} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n24. ✓ Ok"),
@@ -232,7 +232,7 @@ start() ->
     io:format("\n28. Store value with key '6' on 'enode-2' and expect: ok"),
     {ok,Ref28} = main:put({6,system0,time:now()},'enode-2',one),
     receive
-      #repl{ref = {_,Ref28},response = {ok,_,_}} -> ok
+      #coord{ref = Ref28, status = ok} -> ok
       after ?WAIT -> throw(timeout)
     end,
     io:format("\n28. ✓ Ok"),
@@ -254,9 +254,7 @@ start() ->
     io:format("\n32. ✓ Ok")
     of
         _ -> 
-          io:format("\n == Unit test successful. All 32 tests passed. == \n"),
-          main:stop(),
-          main:shutdown()
+          io:format("\n == Unit test successful. All 32 tests passed. == \n")
     catch
       Type:Res -> 
         io:format("\n == Unit test error. Last test did not pass. == \n"),
